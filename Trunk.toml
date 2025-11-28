@@ -1,0 +1,4 @@
+[[hooks]]
+stage = "build"
+command = "sh"
+command_arguments = ["-c", "mkdir -p dist/node_modules/@rcade/plugin-input-classic/dist && curl -L https://unpkg.com/@rcade/plugin-input-classic/dist/index.js -o dist/node_modules/@rcade/plugin-input-classic/dist/index.js"]

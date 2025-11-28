@@ -1,0 +1,15 @@
+{
+  "name": "black-friday",
+  "display_name": "Black Friday",
+  "description": "andrew buys christmas presents (and maybe a kindle for himself)",
+  "visibility": "public",
+  "authors": {
+    "display_name": "Andrew"
+  },
+  "dependencies": [
+    {
+      "name": "@rcade/input-classic",
+      "version": "1.0.0"
+    }
+  ]
+}
