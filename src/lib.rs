@@ -91,6 +91,10 @@ struct GameState {
     controller: Option<ClassicController>,
     mode: PlayerMode,
     phase: GamePhase,
+    menu_selection: PlayerMode,
+    last_system_one_player: bool,
+    last_system_two_player: bool,
+    last_confirm: bool,
 }
 
 #[derive(Default, Clone)]
@@ -195,6 +199,10 @@ impl GameState {
             controller: None,
             mode: PlayerMode::Single,
             phase: GamePhase::ModeSelect,
+            menu_selection: PlayerMode::Single,
+            last_system_one_player: false,
+            last_system_two_player: false,
+            last_confirm: false,
         }
     }
 
@@ -222,6 +230,7 @@ impl GameState {
         self.reset_runtime();
         self.players.clear();
         self.phase = GamePhase::ModeSelect;
+        self.menu_selection = PlayerMode::Single;
     }
 
     fn update(&mut self) {
@@ -399,14 +408,30 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
     if state.phase == GamePhase::ModeSelect {
         ctx.set_fill_style(&JsValue::from_str("#fff"));
         ctx.set_font("18px monospace");
-        ctx.fill_text("BLACK FRIDAY", 65.0, 90.0).unwrap();
+        ctx.fill_text("BLACK FRIDAY", 65.0, 80.0).unwrap();
+
         ctx.set_font("12px monospace");
-        ctx.fill_text("Press 1P to start solo", 80.0, 130.0)
+        let single_prefix = if state.menu_selection == PlayerMode::Single {
+            ">"
+        } else {
+            " "
+        };
+        let two_prefix = if state.menu_selection == PlayerMode::Two {
+            ">"
+        } else {
+            " "
+        };
+
+        ctx.fill_text(&format!("{single_prefix} 1P – Solo shopper"), 60.0, 120.0)
             .unwrap();
-        ctx.fill_text("Press 2P to team up", 78.0, 150.0).unwrap();
+        ctx.fill_text(&format!("{two_prefix} 2P – Shop with friend"), 60.0, 145.0)
+            .unwrap();
+
         ctx.set_font("10px monospace");
         ctx.set_fill_style(&JsValue::from_str("#aaa"));
-        ctx.fill_text("Catch $ deals, dodge red Xs", 70.0, 190.0)
+        ctx.fill_text("←/→: Select | A or 1P/2P: Start", 55.0, 175.0)
+            .unwrap();
+        ctx.fill_text("Catch $ deals, dodge red Xs", 70.0, 195.0)
             .unwrap();
         return;
     }
@@ -544,28 +569,37 @@ pub fn main() -> Result<(), JsValue> {
             inputs.merge_controller(controller);
         }
 
+        let confirm_now = inputs.player1_a || inputs.player2_a;
+        let sys1_now = inputs.system_one_player;
+        let sys2_now = inputs.system_two_player;
+
         match state.phase {
             GamePhase::ModeSelect => {
-                if inputs.system_two_player
-                    || inputs.player2_left
-                    || inputs.player2_right
-                    || inputs.player2_a
-                {
+                // Menu navigation: left chooses 1P, right chooses 2P
+                if inputs.player1_left || inputs.player2_left {
+                    state.menu_selection = PlayerMode::Single;
+                }
+                if inputs.player1_right || inputs.player2_right {
+                    state.menu_selection = PlayerMode::Two;
+                }
+
+                // System buttons instantly choose + start
+                if sys2_now && !state.last_system_two_player {
                     state.start_new_game(PlayerMode::Two);
-                } else if inputs.system_one_player
-                    || inputs.player1_left
-                    || inputs.player1_right
-                    || inputs.player1_a
-                {
+                } else if sys1_now && !state.last_system_one_player {
                     state.start_new_game(PlayerMode::Single);
+                } else if confirm_now && !state.last_confirm {
+                    // A starts currently highlighted option
+                    let mode = state.menu_selection;
+                    state.start_new_game(mode);
                 }
             }
             GamePhase::GameOver => {
-                if inputs.system_two_player {
+                if sys2_now && !state.last_system_two_player {
                     state.start_new_game(PlayerMode::Two);
-                } else if inputs.system_one_player {
+                } else if sys1_now && !state.last_system_one_player {
                     state.start_new_game(PlayerMode::Single);
-                } else if inputs.player1_a || inputs.player2_a {
+                } else if confirm_now && !state.last_confirm {
                     state.back_to_menu();
                 }
             }
@@ -587,6 +621,10 @@ pub fn main() -> Result<(), JsValue> {
                 }
             }
         }
+
+        state.last_system_one_player = sys1_now;
+        state.last_system_two_player = sys2_now;
+        state.last_confirm = confirm_now;
 
         // Update game state
         state.update();
