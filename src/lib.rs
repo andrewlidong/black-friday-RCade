@@ -14,8 +14,12 @@ const PLAYER_HEIGHT: f64 = 30.0;
 const PLAYER_SPEED: f64 = 3.0;
 const OBJECT_WIDTH: f64 = 20.0;
 const OBJECT_HEIGHT: f64 = 20.0;
-const OBJECT_SPEED: f64 = 2.0;
-const SPAWN_INTERVAL: u32 = 60; // frames
+
+// Base falling speed for objects. This will be scaled by difficulty.
+const OBJECT_SPEED: f64 = 3.0;
+
+// Base spawn interval in "difficulty ticks". Real spawn rate speeds up as difficulty rises.
+const BASE_SPAWN_INTERVAL: f64 = 45.0;
 
 #[derive(Clone)]
 enum ObjectType {
@@ -43,6 +47,7 @@ struct GameState {
     frame_count: u32,
     game_over: bool,
     difficulty_multiplier: f64,
+    spawn_meter: f64,
     controller: Option<ClassicController>,
 }
 
@@ -55,10 +60,12 @@ impl GameState {
             },
             objects: Vec::new(),
             score: 0,
-            health: 3,
+            // Fewer mistakes allowed makes the game much tougher.
+            health: 2,
             frame_count: 0,
             game_over: false,
             difficulty_multiplier: 1.0,
+            spawn_meter: 0.0,
             controller: None,
         }
     }
@@ -74,14 +81,35 @@ impl GameState {
 
         self.frame_count += 1;
 
-        // Increase difficulty over time
+        // Increase difficulty over time.
+        //
+        // We ramp up relatively quickly: every ~10 seconds at 60 FPS, we get a
+        // noticeable bump in speed and spawn rate.
         if self.frame_count % 600 == 0 {
-            self.difficulty_multiplier += 0.1;
+            self.difficulty_multiplier += 0.2;
         }
 
-        // Spawn new objects
-        if self.frame_count % SPAWN_INTERVAL == 0 {
+        // Spawn new objects based on a difficulty-scaled meter instead of fixed frames.
+        //
+        // Higher difficulty increases how fast the spawn meter fills, which means
+        // more objects per second as you survive longer.
+        let spawn_fill_rate = 1.0 * self.difficulty_multiplier;
+        self.spawn_meter += spawn_fill_rate;
+
+        let effective_interval = (BASE_SPAWN_INTERVAL / self.difficulty_multiplier)
+            .max(10.0); // cap so it never becomes *too* fast to be playable
+
+        while self.spawn_meter >= effective_interval {
+            self.spawn_meter -= effective_interval;
             self.spawn_object();
+
+            // At very high difficulty, sometimes spawn an extra object for chaos.
+            if self.difficulty_multiplier >= 2.0 {
+                let mut rng = rand::thread_rng();
+                if rng.gen_bool(0.25) {
+                    self.spawn_object();
+                }
+            }
         }
 
         // Update falling objects
@@ -106,8 +134,14 @@ impl GameState {
         let mut rng = rand::thread_rng();
         let x = rng.gen_range(0.0..CANVAS_WIDTH - OBJECT_WIDTH);
 
-        // 60% good deals, 40% bad items
-        let obj_type = if rng.gen_bool(0.6) {
+        // Base chance for a good deal goes down as difficulty increases,
+        // so the game feels harsher the longer you survive.
+        let mut good_chance = 0.6 - 0.15 * (self.difficulty_multiplier - 1.0);
+        if good_chance < 0.25 {
+            good_chance = 0.25;
+        }
+
+        let obj_type = if rng.gen_bool(good_chance) {
             ObjectType::GoodDeal
         } else {
             ObjectType::BadItem
