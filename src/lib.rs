@@ -5,8 +5,8 @@ use rand::Rng;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const CANVAS_WIDTH: f64 = 336.0;
-const CANVAS_HEIGHT: f64 = 262.0;
+const CANVAS_WIDTH: f64 = 330.0;
+const CANVAS_HEIGHT: f64 = 250.0;
 const PLAYER_WIDTH: f64 = 30.0;
 const PLAYER_HEIGHT: f64 = 30.0;
 const PLAYER_SPEED: f64 = 3.0;
