@@ -5,14 +5,14 @@ use rand::Rng;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const CANVAS_WIDTH: f64 = 800.0;
-const CANVAS_HEIGHT: f64 = 600.0;
-const PLAYER_WIDTH: f64 = 60.0;
-const PLAYER_HEIGHT: f64 = 60.0;
-const PLAYER_SPEED: f64 = 5.0;
-const OBJECT_WIDTH: f64 = 40.0;
-const OBJECT_HEIGHT: f64 = 40.0;
-const OBJECT_SPEED: f64 = 3.0;
+const CANVAS_WIDTH: f64 = 336.0;
+const CANVAS_HEIGHT: f64 = 262.0;
+const PLAYER_WIDTH: f64 = 30.0;
+const PLAYER_HEIGHT: f64 = 30.0;
+const PLAYER_SPEED: f64 = 3.0;
+const OBJECT_WIDTH: f64 = 20.0;
+const OBJECT_HEIGHT: f64 = 20.0;
+const OBJECT_SPEED: f64 = 2.0;
 const SPAWN_INTERVAL: u32 = 60; // frames
 
 #[derive(Clone)]
@@ -175,15 +175,15 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
     if state.game_over {
         // Draw game over screen
         ctx.set_fill_style(&JsValue::from_str("#fff"));
-        ctx.set_font("48px monospace");
-        ctx.fill_text("GAME OVER", CANVAS_WIDTH / 2.0 - 140.0, CANVAS_HEIGHT / 2.0 - 50.0).unwrap();
+        ctx.set_font("20px monospace");
+        ctx.fill_text("GAME OVER", CANVAS_WIDTH / 2.0 - 55.0, CANVAS_HEIGHT / 2.0 - 20.0).unwrap();
 
-        ctx.set_font("24px monospace");
-        let score_text = format!("Final Score: {}", state.score);
-        ctx.fill_text(&score_text, CANVAS_WIDTH / 2.0 - 100.0, CANVAS_HEIGHT / 2.0).unwrap();
+        ctx.set_font("12px monospace");
+        let score_text = format!("Score: {}", state.score);
+        ctx.fill_text(&score_text, CANVAS_WIDTH / 2.0 - 30.0, CANVAS_HEIGHT / 2.0).unwrap();
 
-        ctx.set_font("18px monospace");
-        ctx.fill_text("Press A to Restart", CANVAS_WIDTH / 2.0 - 100.0, CANVAS_HEIGHT / 2.0 + 50.0).unwrap();
+        ctx.set_font("10px monospace");
+        ctx.fill_text("Press A to Restart", CANVAS_WIDTH / 2.0 - 45.0, CANVAS_HEIGHT / 2.0 + 20.0).unwrap();
         return;
     }
 
@@ -196,8 +196,8 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
 
     // Draw cart label
     ctx.set_fill_style(&JsValue::from_str("#fff"));
-    ctx.set_font("12px monospace");
-    ctx.fill_text("CART", state.player.x + 12.0, state.player.y + 35.0).unwrap();
+    ctx.set_font("8px monospace");
+    ctx.fill_text("CART", state.player.x + 4.0, state.player.y + 18.0).unwrap();
 
     // Draw falling objects
     for obj in &state.objects {
@@ -207,36 +207,37 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
                 ctx.set_fill_style(&JsValue::from_str("#00ff00"));
                 ctx.fill_rect(obj.x, obj.y, OBJECT_WIDTH, OBJECT_HEIGHT);
                 ctx.set_fill_style(&JsValue::from_str("#000"));
-                ctx.set_font("20px monospace");
-                ctx.fill_text("$", obj.x + 13.0, obj.y + 28.0).unwrap();
+                ctx.set_font("14px monospace");
+                ctx.fill_text("$", obj.x + 5.0, obj.y + 15.0).unwrap();
             }
             ObjectType::BadItem => {
                 // Red for bad items
                 ctx.set_fill_style(&JsValue::from_str("#ff0000"));
                 ctx.fill_rect(obj.x, obj.y, OBJECT_WIDTH, OBJECT_HEIGHT);
                 ctx.set_fill_style(&JsValue::from_str("#fff"));
-                ctx.set_font("20px monospace");
-                ctx.fill_text("X", obj.x + 12.0, obj.y + 28.0).unwrap();
+                ctx.set_font("14px monospace");
+                ctx.fill_text("X", obj.x + 5.0, obj.y + 15.0).unwrap();
             }
         }
     }
 
     // Draw HUD
     ctx.set_fill_style(&JsValue::from_str("#fff"));
-    ctx.set_font("20px monospace");
-    ctx.fill_text(&format!("Score: {}", state.score), 10.0, 30.0).unwrap();
+    ctx.set_font("10px monospace");
+    ctx.fill_text(&format!("Score: {}", state.score), 5.0, 15.0).unwrap();
 
     // Draw health hearts
     let heart = "\u{2665}"; // ♥
     ctx.set_fill_style(&JsValue::from_str("#ff0000"));
+    ctx.set_font("10px monospace");
     for i in 0..state.health {
-        ctx.fill_text(heart, 10.0 + (i as f64 * 30.0), 60.0).unwrap();
+        ctx.fill_text(heart, 5.0 + (i as f64 * 15.0), 30.0).unwrap();
     }
 
     // Draw instructions at the bottom
     ctx.set_fill_style(&JsValue::from_str("#888"));
-    ctx.set_font("14px monospace");
-    ctx.fill_text("D-PAD: Move | GREEN $ = Good Deals | RED X = Junk", 180.0, CANVAS_HEIGHT - 10.0).unwrap();
+    ctx.set_font("8px monospace");
+    ctx.fill_text("D-PAD: Move | $ = Good | X = Bad", 60.0, CANVAS_HEIGHT - 5.0).unwrap();
 }
 
 #[wasm_bindgen(module = "/node_modules/@rcade/plugin-input-classic/dist/index.js")]
