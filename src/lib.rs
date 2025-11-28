@@ -82,6 +82,13 @@ enum GamePhase {
     ModeSelect,
     Playing,
     GameOver,
+    NameEntry,
+}
+
+struct LeaderboardEntry {
+    score: i32,
+    mode: PlayerMode,
+    name: String,
 }
 
 struct GameState {
@@ -97,7 +104,15 @@ struct GameState {
     last_system_one_player: bool,
     last_system_two_player: bool,
     last_confirm: bool,
+    last_up: bool,
+    last_down: bool,
+    last_left: bool,
+    last_right: bool,
     final_scores: Vec<(usize, i32)>, // (player_index, score) for dead players
+    leaderboard: Vec<LeaderboardEntry>,
+    pending_scores: Vec<(usize, i32)>, // Scores waiting for name entry
+    current_name: String,
+    name_entry_index: usize, // Which player we're entering name for
 }
 
 #[derive(Default, Clone)]
@@ -106,10 +121,13 @@ struct KeyboardState {
     system_two_player: bool,
     player1_left: bool,
     player1_right: bool,
+    player1_up: bool,
+    player1_down: bool,
     player1_a: bool,
     player2_left: bool,
     player2_right: bool,
     player2_a: bool,
+    last_key: Option<String>, // For name entry
 }
 
 impl KeyboardState {
@@ -129,6 +147,14 @@ impl KeyboardState {
             }
             "ArrowRight" => {
                 self.player1_right = pressed;
+                true
+            }
+            "ArrowUp" => {
+                self.player1_up = pressed;
+                true
+            }
+            "ArrowDown" => {
+                self.player1_down = pressed;
                 true
             }
             "ControlLeft" => {
@@ -158,6 +184,8 @@ struct InputSnapshot {
     system_two_player: bool,
     player1_left: bool,
     player1_right: bool,
+    player1_up: bool,
+    player1_down: bool,
     player1_a: bool,
     player2_left: bool,
     player2_right: bool,
@@ -171,6 +199,8 @@ impl InputSnapshot {
             system_two_player: state.system_two_player,
             player1_left: state.player1_left,
             player1_right: state.player1_right,
+            player1_up: state.player1_up,
+            player1_down: state.player1_down,
             player1_a: state.player1_a,
             player2_left: state.player2_left,
             player2_right: state.player2_right,
@@ -193,7 +223,7 @@ impl InputSnapshot {
 
 impl GameState {
     fn new() -> Self {
-        GameState {
+        let mut state = GameState {
             players: Vec::new(),
             objects: Vec::new(),
             frame_count: 0,
@@ -206,8 +236,18 @@ impl GameState {
             last_system_one_player: false,
             last_system_two_player: false,
             last_confirm: false,
+            last_up: false,
+            last_down: false,
+            last_left: false,
+            last_right: false,
             final_scores: Vec::new(),
-        }
+            leaderboard: Vec::new(),
+            pending_scores: Vec::new(),
+            current_name: String::new(),
+            name_entry_index: 0,
+        };
+        state.load_leaderboard();
+        state
     }
 
     fn set_controller(&mut self, controller: ClassicController) {
@@ -220,6 +260,9 @@ impl GameState {
         self.difficulty_multiplier = 1.0;
         self.spawn_meter = 0.0;
         self.final_scores.clear();
+        self.pending_scores.clear();
+        self.current_name.clear();
+        self.name_entry_index = 0;
     }
 
     fn start_new_game(&mut self, mode: PlayerMode) {
@@ -236,6 +279,176 @@ impl GameState {
         self.players.clear();
         self.phase = GamePhase::ModeSelect;
         self.menu_selection = PlayerMode::Single;
+        self.load_leaderboard(); // Refresh leaderboard when returning to menu
+    }
+
+    fn load_leaderboard(&mut self) {
+        let window = web_sys::window().unwrap();
+        if let Ok(Some(storage)) = window.local_storage() {
+            if let Ok(Some(data)) = storage.get_item("black_friday_leaderboard") {
+                if let Ok(parsed) = js_sys::JSON::parse(&data) {
+                    let array = js_sys::Array::from(&parsed);
+                    self.leaderboard.clear();
+                    for i in 0..array.length() {
+                        if let Some(entry) = array.get(i).dyn_ref::<js_sys::Object>() {
+                            if let (Ok(score), Ok(mode_num)) = (
+                                js_sys::Reflect::get(entry, &JsValue::from_str("score"))
+                                    .and_then(|v| v.as_f64().ok_or(JsValue::NULL)),
+                                js_sys::Reflect::get(entry, &JsValue::from_str("mode"))
+                                    .and_then(|v| v.as_f64().ok_or(JsValue::NULL)),
+                            ) {
+                                let mode = if mode_num == 0.0 {
+                                    PlayerMode::Single
+                                } else {
+                                    PlayerMode::Two
+                                };
+                                let name = js_sys::Reflect::get(entry, &JsValue::from_str("name"))
+                                    .ok()
+                                    .and_then(|v| v.as_string())
+                                    .unwrap_or_else(|| "AAA".to_string());
+                                self.leaderboard.push(LeaderboardEntry {
+                                    score: score as i32,
+                                    mode,
+                                    name,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn save_leaderboard(&self) {
+        let window = web_sys::window().unwrap();
+        if let Ok(Some(storage)) = window.local_storage() {
+            let array = js_sys::Array::new();
+            for entry in &self.leaderboard {
+                let obj = js_sys::Object::new();
+                js_sys::Reflect::set(
+                    &obj,
+                    &JsValue::from_str("score"),
+                    &JsValue::from_f64(entry.score as f64),
+                )
+                .unwrap();
+                js_sys::Reflect::set(
+                    &obj,
+                    &JsValue::from_str("mode"),
+                    &JsValue::from_f64(if entry.mode == PlayerMode::Single {
+                        0.0
+                    } else {
+                        1.0
+                    }),
+                )
+                .unwrap();
+                js_sys::Reflect::set(
+                    &obj,
+                    &JsValue::from_str("name"),
+                    &JsValue::from_str(&entry.name),
+                )
+                .unwrap();
+                array.push(&obj);
+            }
+            if let Ok(json) = js_sys::JSON::stringify(&array) {
+                let _ = storage.set_item("black_friday_leaderboard", &json.as_string().unwrap());
+            }
+        }
+    }
+
+    fn add_to_leaderboard(&mut self, score: i32, mode: PlayerMode, name: String) {
+        self.leaderboard
+            .push(LeaderboardEntry { score, mode, name });
+        // Sort descending by score
+        self.leaderboard.sort_by(|a, b| b.score.cmp(&a.score));
+        // Keep only top 10
+        if self.leaderboard.len() > 10 {
+            self.leaderboard.truncate(10);
+        }
+        self.save_leaderboard();
+    }
+
+    fn start_name_entry(&mut self) {
+        // Collect all scores that need names
+        self.pending_scores = self.final_scores.clone();
+        if self.pending_scores.is_empty() {
+            // No scores to save, go straight to game over
+            self.phase = GamePhase::GameOver;
+            return;
+        }
+        self.name_entry_index = 0;
+        self.current_name = String::from("AAA");
+        self.phase = GamePhase::NameEntry;
+    }
+
+    fn handle_name_entry(&mut self, inputs: &InputSnapshot) {
+        // Ensure name is 3 characters
+        while self.current_name.len() < 3 {
+            self.current_name.push('A');
+        }
+        let name_chars: Vec<char> = self.current_name.chars().take(3).collect();
+        let mut name_chars: Vec<char> = name_chars.into_iter().collect();
+
+        // Get current cursor position (0-2)
+        let cursor_pos = (self.name_entry_index % 3).min(2);
+
+        // Handle letter changes (up/down)
+        if inputs.player1_up && !self.last_up {
+            let current = name_chars.get(cursor_pos).copied().unwrap_or('A');
+            let new_char = if current == 'A' {
+                'Z'
+            } else {
+                char::from_u32(current as u32 - 1).unwrap_or('A')
+            };
+            if cursor_pos < name_chars.len() {
+                name_chars[cursor_pos] = new_char;
+            }
+        }
+        if inputs.player1_down && !self.last_down {
+            let current = name_chars.get(cursor_pos).copied().unwrap_or('A');
+            let new_char = if current == 'Z' {
+                'A'
+            } else {
+                char::from_u32(current as u32 + 1).unwrap_or('Z')
+            };
+            if cursor_pos < name_chars.len() {
+                name_chars[cursor_pos] = new_char;
+            }
+        }
+
+        // Handle position changes (left/right)
+        if inputs.player1_left && !self.last_left {
+            if self.name_entry_index > 0 {
+                self.name_entry_index -= 1;
+            }
+        }
+        if inputs.player1_right && !self.last_right {
+            if self.name_entry_index < 2 {
+                self.name_entry_index += 1;
+            }
+        }
+
+        // Update name
+        self.current_name = name_chars.iter().take(3).collect();
+
+        // Confirm name
+        if inputs.player1_a {
+            if let Some((player_index, score)) = self.pending_scores.first() {
+                self.add_to_leaderboard(*score, self.mode, self.current_name.clone());
+                self.pending_scores.remove(0);
+
+                if self.pending_scores.is_empty() {
+                    self.phase = GamePhase::GameOver;
+                } else {
+                    self.current_name = String::from("AAA");
+                    self.name_entry_index = 0;
+                }
+            }
+        }
+
+        self.last_up = inputs.player1_up;
+        self.last_down = inputs.player1_down;
+        self.last_left = inputs.player1_left;
+        self.last_right = inputs.player1_right;
     }
 
     fn update(&mut self) {
@@ -375,8 +588,8 @@ impl GameState {
         self.players.retain(|slot| slot.health > 0);
 
         // Game over when all players are dead
-        if self.players.is_empty() {
-            self.phase = GamePhase::GameOver;
+        if self.players.is_empty() && self.phase == GamePhase::Playing {
+            self.start_name_entry();
         }
     }
 
@@ -464,32 +677,94 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
         return;
     }
 
+    if state.phase == GamePhase::NameEntry {
+        ctx.set_fill_style(&JsValue::from_str("#fff"));
+        ctx.set_font("14px monospace");
+
+        if let Some((player_index, score)) = state.pending_scores.first() {
+            ctx.fill_text(
+                &format!("P{} SCORE: {}", player_index + 1, score),
+                CANVAS_WIDTH / 2.0 - 60.0,
+                50.0,
+            )
+            .unwrap();
+
+            ctx.set_font("12px monospace");
+            ctx.fill_text("ENTER NAME", CANVAS_WIDTH / 2.0 - 50.0, 80.0)
+                .unwrap();
+
+            // Draw name with cursor
+            ctx.set_font("20px monospace");
+            let name = if state.current_name.len() >= 3 {
+                state.current_name.chars().take(3).collect::<String>()
+            } else {
+                format!("{:<3}", state.current_name)
+            };
+
+            let name_width = 60.0; // Approximate width for 3 chars
+            let name_x = CANVAS_WIDTH / 2.0 - name_width / 2.0;
+            let name_y = 120.0;
+
+            // Draw each character with cursor indicator
+            for (i, ch) in name.chars().enumerate() {
+                let char_x = name_x + (i as f64 * 20.0);
+                let is_cursor = i == (state.name_entry_index % 3);
+
+                if is_cursor {
+                    // Draw cursor line below
+                    ctx.set_fill_style(&JsValue::from_str("#0ff"));
+                    ctx.fill_rect(char_x, name_y + 20.0, 15.0, 2.0);
+                }
+
+                ctx.set_fill_style(&JsValue::from_str(if is_cursor { "#0ff" } else { "#fff" }));
+                ctx.fill_text(&ch.to_string(), char_x, name_y).unwrap();
+            }
+
+            ctx.set_font("8px monospace");
+            ctx.set_fill_style(&JsValue::from_str("#888"));
+            ctx.fill_text("↑↓: Letter | ←→: Position", 50.0, 160.0)
+                .unwrap();
+            ctx.fill_text("A: Confirm", 120.0, 175.0).unwrap();
+        }
+        return;
+    }
+
     if state.phase == GamePhase::GameOver {
         ctx.set_fill_style(&JsValue::from_str("#fff"));
-        ctx.set_font("20px monospace");
-        ctx.fill_text("GAME OVER", CANVAS_WIDTH / 2.0 - 55.0, 90.0)
+        ctx.set_font("18px monospace");
+        ctx.fill_text("GAME OVER", CANVAS_WIDTH / 2.0 - 50.0, 30.0)
             .unwrap();
-        ctx.set_font("12px monospace");
-
-        // Show scores for all players (alive + dead)
-        let mut score_y = 130.0;
-        // First show alive players (shouldn't happen, but just in case)
-        for slot in &state.players {
-            let text = format!("P{} Score: {}", slot.player_index + 1, slot.score);
-            ctx.fill_text(&text, 85.0, score_y).unwrap();
-            score_y += 18.0;
-        }
-        // Then show final scores of dead players
-        for (player_index, score) in &state.final_scores {
-            let text = format!("P{} Score: {}", player_index + 1, score);
-            ctx.fill_text(&text, 85.0, score_y).unwrap();
-            score_y += 18.0;
-        }
 
         ctx.set_font("10px monospace");
-        ctx.fill_text("Press A to return to menu", 60.0, 190.0)
-            .unwrap();
-        ctx.fill_text("Or choose 1P/2P to start again", 40.0, 210.0)
+        // Show current game scores
+        let mut score_y = 55.0;
+        for (player_index, score) in &state.final_scores {
+            let text = format!("P{}: {}", player_index + 1, score);
+            ctx.fill_text(&text, 10.0, score_y).unwrap();
+            score_y += 12.0;
+        }
+
+        // Show leaderboard (top 5)
+        ctx.set_font("9px monospace");
+        ctx.set_fill_style(&JsValue::from_str("#aaa"));
+        ctx.fill_text("TOP SCORES", 10.0, score_y + 5.0).unwrap();
+        ctx.set_fill_style(&JsValue::from_str("#fff"));
+        score_y += 18.0;
+
+        for (i, entry) in state.leaderboard.iter().take(5).enumerate() {
+            let mode_text = if entry.mode == PlayerMode::Single {
+                "1P"
+            } else {
+                "2P"
+            };
+            let text = format!("{}. {} {} ({})", i + 1, entry.name, entry.score, mode_text);
+            ctx.fill_text(&text, 10.0, score_y).unwrap();
+            score_y += 11.0;
+        }
+
+        ctx.set_font("8px monospace");
+        ctx.set_fill_style(&JsValue::from_str("#888"));
+        ctx.fill_text("A: Menu | 1P/2P: Restart", 10.0, CANVAS_HEIGHT - 10.0)
             .unwrap();
         return;
     }
@@ -665,6 +940,9 @@ pub fn main() -> Result<(), JsValue> {
                         state.move_player(1, 1.0);
                     }
                 }
+            }
+            GamePhase::NameEntry => {
+                state.handle_name_entry(&inputs);
             }
         }
 

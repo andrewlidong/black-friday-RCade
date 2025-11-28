@@ -20,6 +20,7 @@ web-sys = { version = "0.3", features = [
     "KeyboardEvent",
     "Window",
     "Performance",
+    "Storage",
 ] }
 getrandom = { version = "0.2", features = ["js"] }
 rand = "0.8"
