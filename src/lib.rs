@@ -43,6 +43,7 @@ struct PlayerSlot {
     player: Player,
     score: i32,
     health: i32,
+    player_index: usize, // Original player slot (0 for P1, 1 for P2)
 }
 
 impl PlayerSlot {
@@ -55,7 +56,8 @@ impl PlayerSlot {
                 y: CANVAS_HEIGHT - PLAYER_HEIGHT - 20.0,
             },
             score: 0,
-            health: 2,
+            health: 3,
+            player_index: index,
         }
     }
 }
@@ -95,6 +97,7 @@ struct GameState {
     last_system_one_player: bool,
     last_system_two_player: bool,
     last_confirm: bool,
+    final_scores: Vec<(usize, i32)>, // (player_index, score) for dead players
 }
 
 #[derive(Default, Clone)]
@@ -203,6 +206,7 @@ impl GameState {
             last_system_one_player: false,
             last_system_two_player: false,
             last_confirm: false,
+            final_scores: Vec::new(),
         }
     }
 
@@ -215,6 +219,7 @@ impl GameState {
         self.frame_count = 0;
         self.difficulty_multiplier = 1.0;
         self.spawn_meter = 0.0;
+        self.final_scores.clear();
     }
 
     fn start_new_game(&mut self, mode: PlayerMode) {
@@ -321,6 +326,11 @@ impl GameState {
             let obj_bottom = obj.y + OBJECT_HEIGHT;
 
             for player_slot in &mut self.players {
+                // Skip dead players
+                if player_slot.health <= 0 {
+                    continue;
+                }
+
                 let player_left = player_slot.player.x;
                 let player_right = player_slot.player.x + PLAYER_WIDTH;
                 let player_top = player_slot.player.y;
@@ -352,13 +362,31 @@ impl GameState {
             self.objects.remove(i);
         }
 
-        if self.players.iter().all(|slot| slot.health <= 0) {
+        // Store final scores and remove dead players
+        let dead_players: Vec<_> = self
+            .players
+            .iter()
+            .filter(|slot| slot.health <= 0)
+            .map(|slot| (slot.player_index, slot.score))
+            .collect();
+        for (player_index, score) in dead_players {
+            self.final_scores.push((player_index, score));
+        }
+        self.players.retain(|slot| slot.health > 0);
+
+        // Game over when all players are dead
+        if self.players.is_empty() {
             self.phase = GamePhase::GameOver;
         }
     }
 
-    fn move_player(&mut self, index: usize, dx: f64) {
-        if let Some(player_slot) = self.players.get_mut(index) {
+    fn move_player(&mut self, player_index: usize, dx: f64) {
+        // Find player by their original slot index (not array position)
+        if let Some(player_slot) = self
+            .players
+            .iter_mut()
+            .find(|slot| slot.player_index == player_index && slot.health > 0)
+        {
             player_slot.player.x += dx * PLAYER_SPEED;
             if player_slot.player.x < 0.0 {
                 player_slot.player.x = 0.0;
@@ -443,10 +471,19 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
             .unwrap();
         ctx.set_font("12px monospace");
 
-        for (idx, slot) in state.players.iter().enumerate() {
-            let text = format!("P{} Score: {}", idx + 1, slot.score);
-            ctx.fill_text(&text, 85.0, 130.0 + (idx as f64 * 18.0))
-                .unwrap();
+        // Show scores for all players (alive + dead)
+        let mut score_y = 130.0;
+        // First show alive players (shouldn't happen, but just in case)
+        for slot in &state.players {
+            let text = format!("P{} Score: {}", slot.player_index + 1, slot.score);
+            ctx.fill_text(&text, 85.0, score_y).unwrap();
+            score_y += 18.0;
+        }
+        // Then show final scores of dead players
+        for (player_index, score) in &state.final_scores {
+            let text = format!("P{} Score: {}", player_index + 1, score);
+            ctx.fill_text(&text, 85.0, score_y).unwrap();
+            score_y += 18.0;
         }
 
         ctx.set_font("10px monospace");
@@ -459,8 +496,8 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
 
     let player_colors = ["#4a9eff", "#ff9f43"];
 
-    for (idx, slot) in state.players.iter().enumerate() {
-        let color = player_colors.get(idx).unwrap_or(&"#4a9eff");
+    for slot in &state.players {
+        let color = player_colors.get(slot.player_index).unwrap_or(&"#4a9eff");
         ctx.set_fill_style(&JsValue::from_str(color));
         ctx.fill_rect(slot.player.x, slot.player.y, PLAYER_WIDTH, PLAYER_HEIGHT);
         ctx.set_stroke_style(&JsValue::from_str("#fff"));
@@ -469,7 +506,7 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
 
         ctx.set_fill_style(&JsValue::from_str("#fff"));
         ctx.set_font("8px monospace");
-        let label = format!("P{}", idx + 1);
+        let label = format!("P{}", slot.player_index + 1);
         ctx.fill_text(&label, slot.player.x + 6.0, slot.player.y + 18.0)
             .unwrap();
     }
@@ -499,18 +536,27 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
     // Draw HUD
     ctx.set_fill_style(&JsValue::from_str("#fff"));
     ctx.set_font("10px monospace");
-    for (idx, slot) in state.players.iter().enumerate() {
-        let y = 15.0 + (idx as f64 * 15.0);
-        ctx.fill_text(&format!("P{} Score: {}", idx + 1, slot.score), 5.0, y)
-            .unwrap();
+    let mut hud_y = 15.0;
+    for slot in &state.players {
+        ctx.fill_text(
+            &format!("P{} Score: {}", slot.player_index + 1, slot.score),
+            5.0,
+            hud_y,
+        )
+        .unwrap();
 
         let heart = "\u{2665}";
         ctx.set_fill_style(&JsValue::from_str("#ff4444"));
         for i in 0..slot.health {
-            ctx.fill_text(heart, 120.0 + (idx as f64 * 70.0) + (i as f64 * 12.0), y)
-                .unwrap();
+            ctx.fill_text(
+                heart,
+                120.0 + (slot.player_index as f64 * 70.0) + (i as f64 * 12.0),
+                hud_y,
+            )
+            .unwrap();
         }
         ctx.set_fill_style(&JsValue::from_str("#fff"));
+        hud_y += 15.0;
     }
 
     // Draw instructions at the bottom
