@@ -1,9 +1,11 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::spawn_local;
 use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 use rand::Rng;
 use std::cell::RefCell;
 use std::rc::Rc;
+use rcade_plugin_input_classic::ClassicController;
 
 const CANVAS_WIDTH: f64 = 330.0;
 const CANVAS_HEIGHT: f64 = 250.0;
@@ -41,6 +43,7 @@ struct GameState {
     frame_count: u32,
     game_over: bool,
     difficulty_multiplier: f64,
+    controller: Option<ClassicController>,
 }
 
 impl GameState {
@@ -56,7 +59,12 @@ impl GameState {
             frame_count: 0,
             game_over: false,
             difficulty_multiplier: 1.0,
+            controller: None,
         }
+    }
+
+    fn set_controller(&mut self, controller: ClassicController) {
+        self.controller = Some(controller);
     }
 
     fn update(&mut self) {
@@ -240,33 +248,6 @@ fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
     ctx.fill_text("D-PAD: Move | $ = Good | X = Bad", 60.0, CANVAS_HEIGHT - 5.0).unwrap();
 }
 
-#[wasm_bindgen(module = "/node_modules/@rcade/plugin-input-classic/dist/index.js")]
-extern "C" {
-    #[wasm_bindgen(js_name = PLAYER_1)]
-    static PLAYER_1: JsValue;
-
-    #[wasm_bindgen(js_name = SYSTEM)]
-    static SYSTEM: JsValue;
-}
-
-fn get_input_value(obj: &JsValue, key: &str) -> bool {
-    unsafe {
-        js_sys::Reflect::get(obj, &JsValue::from_str(key))
-            .ok()
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    }
-}
-
-fn get_dpad_value(obj: &JsValue, direction: &str) -> bool {
-    unsafe {
-        js_sys::Reflect::get(obj, &JsValue::from_str("DPAD"))
-            .ok()
-            .and_then(|dpad| js_sys::Reflect::get(&dpad, &JsValue::from_str(direction)).ok())
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-    }
-}
 
 #[wasm_bindgen(start)]
 pub fn main() -> Result<(), JsValue> {
@@ -282,6 +263,14 @@ pub fn main() -> Result<(), JsValue> {
 
     let game_state = Rc::new(RefCell::new(GameState::new()));
 
+    // Acquire controller asynchronously
+    let game_state_for_controller = game_state.clone();
+    spawn_local(async move {
+        if let Ok(controller) = ClassicController::acquire().await {
+            game_state_for_controller.borrow_mut().set_controller(controller);
+        }
+    });
+
     // Game loop
     let f = Rc::new(RefCell::new(None));
     let g = f.clone();
@@ -291,18 +280,20 @@ pub fn main() -> Result<(), JsValue> {
         let mut state = game_state_clone.borrow_mut();
 
         // Handle input
-        unsafe {
+        if let Some(controller) = &state.controller {
+            let input = controller.state();
+
             if state.game_over {
                 // Check for restart
-                if get_input_value(&PLAYER_1, "A") {
+                if input.player1_a {
                     state.reset();
                 }
             } else {
                 // Player movement
-                if get_dpad_value(&PLAYER_1, "left") {
+                if input.player1_left {
                     state.move_player(-1.0);
                 }
-                if get_dpad_value(&PLAYER_1, "right") {
+                if input.player1_right {
                     state.move_player(1.0);
                 }
             }
