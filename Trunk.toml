@@ -1,4 +1,7 @@
 [[hooks]]
 stage = "pre_build"
 command = "sh"
-command_arguments = ["-c", "mkdir -p node_modules/@rcade/plugin-input-classic/dist && curl -L https://unpkg.com/@rcade/plugin-input-classic/dist/index.js -o node_modules/@rcade/plugin-input-classic/dist/index.js"]
+command_arguments = ["-c", "mkdir -p node_modules/@rcade/plugin-input-classic/dist && test -f node_modules/@rcade/plugin-input-classic/dist/index.js || curl -L https://unpkg.com/@rcade/plugin-input-classic/dist/index.js -o node_modules/@rcade/plugin-input-classic/dist/index.js"]
+
+[watch]
+ignore = ["node_modules"]
