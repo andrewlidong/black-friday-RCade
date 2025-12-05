@@ -5,7 +5,7 @@ use std::rc::Rc;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement, KeyboardEvent};
+use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
 
 const CANVAS_WIDTH: f64 = 330.0;
 const CANVAS_HEIGHT: f64 = 250.0;
@@ -116,69 +116,6 @@ struct GameState {
 }
 
 #[derive(Default, Clone)]
-struct KeyboardState {
-    system_one_player: bool,
-    system_two_player: bool,
-    player1_left: bool,
-    player1_right: bool,
-    player1_up: bool,
-    player1_down: bool,
-    player1_a: bool,
-    player2_left: bool,
-    player2_right: bool,
-    player2_a: bool,
-    last_key: Option<String>, // For name entry
-}
-
-impl KeyboardState {
-    fn handle_code(&mut self, code: &str, pressed: bool) -> bool {
-        match code {
-            "Digit1" => {
-                self.system_one_player = pressed;
-                true
-            }
-            "Digit2" => {
-                self.system_two_player = pressed;
-                true
-            }
-            "ArrowLeft" => {
-                self.player1_left = pressed;
-                true
-            }
-            "ArrowRight" => {
-                self.player1_right = pressed;
-                true
-            }
-            "ArrowUp" => {
-                self.player1_up = pressed;
-                true
-            }
-            "ArrowDown" => {
-                self.player1_down = pressed;
-                true
-            }
-            "ControlLeft" => {
-                self.player1_a = pressed;
-                true
-            }
-            "KeyD" => {
-                self.player2_left = pressed;
-                true
-            }
-            "KeyG" => {
-                self.player2_right = pressed;
-                true
-            }
-            "KeyA" => {
-                self.player2_a = pressed;
-                true
-            }
-            _ => false,
-        }
-    }
-}
-
-#[derive(Default, Clone)]
 struct InputSnapshot {
     system_one_player: bool,
     system_two_player: bool,
@@ -193,31 +130,20 @@ struct InputSnapshot {
 }
 
 impl InputSnapshot {
-    fn from_keyboard(state: &KeyboardState) -> Self {
-        InputSnapshot {
-            system_one_player: state.system_one_player,
-            system_two_player: state.system_two_player,
-            player1_left: state.player1_left,
-            player1_right: state.player1_right,
-            player1_up: state.player1_up,
-            player1_down: state.player1_down,
-            player1_a: state.player1_a,
-            player2_left: state.player2_left,
-            player2_right: state.player2_right,
-            player2_a: state.player2_a,
-        }
-    }
-
-    fn merge_controller(&mut self, controller: &ClassicController) {
+    fn from_controller(controller: &ClassicController) -> Self {
         let ctrl = controller.state();
-        self.system_one_player |= ctrl.system_one_player;
-        self.system_two_player |= ctrl.system_two_player;
-        self.player1_left |= ctrl.player1_left;
-        self.player1_right |= ctrl.player1_right;
-        self.player1_a |= ctrl.player1_a;
-        self.player2_left |= ctrl.player2_left;
-        self.player2_right |= ctrl.player2_right;
-        self.player2_a |= ctrl.player2_a;
+        InputSnapshot {
+            system_one_player: ctrl.system_one_player,
+            system_two_player: ctrl.system_two_player,
+            player1_left: ctrl.player1_left,
+            player1_right: ctrl.player1_right,
+            player1_up: ctrl.player1_up,
+            player1_down: ctrl.player1_down,
+            player1_a: ctrl.player1_a,
+            player2_left: ctrl.player2_left,
+            player2_right: ctrl.player2_right,
+            player2_a: ctrl.player2_a,
+        }
     }
 }
 
@@ -611,36 +537,6 @@ impl GameState {
     }
 }
 
-fn setup_keyboard_listeners(state: Rc<RefCell<KeyboardState>>) -> Result<(), JsValue> {
-    let window = web_sys::window().unwrap();
-
-    {
-        let state = state.clone();
-        let keydown = Closure::wrap(Box::new(move |event: KeyboardEvent| {
-            let mut state = state.borrow_mut();
-            if state.handle_code(&event.code(), true) {
-                event.prevent_default();
-            }
-        }) as Box<dyn FnMut(_)>);
-        window.add_event_listener_with_callback("keydown", keydown.as_ref().unchecked_ref())?;
-        keydown.forget();
-    }
-
-    {
-        let state = state.clone();
-        let keyup = Closure::wrap(Box::new(move |event: KeyboardEvent| {
-            let mut state = state.borrow_mut();
-            if state.handle_code(&event.code(), false) {
-                event.prevent_default();
-            }
-        }) as Box<dyn FnMut(_)>);
-        window.add_event_listener_with_callback("keyup", keyup.as_ref().unchecked_ref())?;
-        keyup.forget();
-    }
-
-    Ok(())
-}
-
 fn draw(ctx: &CanvasRenderingContext2d, state: &GameState) {
     // Clear canvas
     ctx.set_fill_style(&JsValue::from_str("#111"));
@@ -858,18 +754,28 @@ pub fn main() -> Result<(), JsValue> {
         .unwrap()
         .dyn_into::<CanvasRenderingContext2d>()?;
 
-    let keyboard_state = Rc::new(RefCell::new(KeyboardState::default()));
-    setup_keyboard_listeners(keyboard_state.clone())?;
-
     let game_state = Rc::new(RefCell::new(GameState::new()));
 
-    // Acquire controller asynchronously
+    // Acquire controller - required for RCade sandbox
+    // We need to wait for the controller before starting the game loop
     let game_state_for_controller = game_state.clone();
+    let controller_ready = Rc::new(RefCell::new(false));
+    let controller_ready_clone = controller_ready.clone();
+
     spawn_local(async move {
-        if let Ok(controller) = ClassicController::acquire().await {
-            game_state_for_controller
-                .borrow_mut()
-                .set_controller(controller);
+        match ClassicController::acquire().await {
+            Ok(controller) => {
+                game_state_for_controller
+                    .borrow_mut()
+                    .set_controller(controller);
+                *controller_ready_clone.borrow_mut() = true;
+            }
+            Err(e) => {
+                web_sys::console::error_1(&JsValue::from_str(&format!(
+                    "Failed to acquire controller: {:?}",
+                    e
+                )));
+            }
         }
     });
 
@@ -878,17 +784,24 @@ pub fn main() -> Result<(), JsValue> {
     let g = f.clone();
 
     let game_state_clone = game_state.clone();
-    let keyboard_state_for_loop = keyboard_state.clone();
+    let controller_ready_for_loop = controller_ready.clone();
+    let f_for_loop = f.clone();
     *g.borrow_mut() = Some(Closure::wrap(Box::new(move || {
+        // Don't run game loop until controller is ready
+        if !*controller_ready_for_loop.borrow() {
+            request_animation_frame(f_for_loop.borrow().as_ref().unwrap());
+            return;
+        }
+
         let mut state = game_state_clone.borrow_mut();
 
-        let mut inputs = {
-            let keyboard_snapshot = keyboard_state_for_loop.borrow().clone();
-            InputSnapshot::from_keyboard(&keyboard_snapshot)
+        // Get inputs from controller (required in RCade sandbox)
+        let inputs = if let Some(controller) = &state.controller {
+            InputSnapshot::from_controller(controller)
+        } else {
+            // Fallback: return empty inputs if controller not available
+            InputSnapshot::default()
         };
-        if let Some(controller) = &state.controller {
-            inputs.merge_controller(controller);
-        }
 
         let confirm_now = inputs.player1_a || inputs.player2_a;
         let sys1_now = inputs.system_one_player;
@@ -957,7 +870,7 @@ pub fn main() -> Result<(), JsValue> {
         draw(&context, &state);
 
         // Schedule next frame
-        request_animation_frame(f.borrow().as_ref().unwrap());
+        request_animation_frame(f_for_loop.borrow().as_ref().unwrap());
     }) as Box<dyn FnMut()>));
 
     request_animation_frame(g.borrow().as_ref().unwrap());
