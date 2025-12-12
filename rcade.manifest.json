@@ -4,7 +4,8 @@
   "description": "andrew buys christmas presents (and maybe a kindle for himself)",
   "visibility": "public",
   "authors": {
-    "display_name": "Andrew"
+    "display_name": "Andrew Dong",
+    "recurse_id": 6597
   },
   "dependencies": [
     {
